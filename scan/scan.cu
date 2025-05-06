@@ -79,45 +79,35 @@ __global__ void downsweep_op_kernel(int* scan_array, int offset, int stride_val,
 // "in-place" scan, since the timing harness makes a copy of input and
 // places it in result
 void exclusive_scan(int* input, int N, int* result) {
-    // CS149 TODO:
-    //
-    // Implement your exclusive scan implementation here.  Keep in
-    // mind that although the arguments to this function are device
-    // allocated arrays, this is a function that is running in a thread
-    // on the CPU.  Your implementation will need to make multiple calls
-    // to CUDA kernel functions (that you must write) to implement the
-    // scan.
-
     // If input and result are different pointers, copy input to result
     if (input != result) {
         cudaMemcpy(result, input, N * sizeof(int), cudaMemcpyDeviceToDevice);
     }
 
+    // Round N up to the next power of 2 for the algorithm
+    int rounded_length = nextPow2(N);
+
     // Initialize variables for the upsweep phase
     int offset = 1;
-    int max_offset = N / 2;
+    int max_offset = rounded_length / 2;
 
     // Execute upsweep phase with a for loop
     for (; offset <= max_offset; offset *= 2) {
         // Calculate the stride between elements
         int stride = offset * 2;
 
-        // Calculate the number of work items and ensure at least 1
-        int work_items = N / stride;
-        if (work_items * stride < N) work_items++;
+        // Calculate the number of work items based on rounded length
+        int work_items = rounded_length / stride;
+        if (work_items * stride < rounded_length) work_items++;
 
         // Ensure we have a minimum of 1 work item
         work_items = (work_items > 0) ? work_items : 1;
 
         // Calculate grid dimensions
-        int block_count = work_items / THREADS_PER_BLOCK;
-        if (work_items % THREADS_PER_BLOCK != 0) block_count++;
+        int block_count = (work_items + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
 
-        // Ensure we have at least one block
-        block_count = (block_count > 0) ? block_count : 1;
-
-        // Launch the kernel
-        upsweep_op_kernel<<<block_count, THREADS_PER_BLOCK>>>(result, offset, stride, N);
+        // Launch the kernel with enough threads to handle rounded_length
+        upsweep_op_kernel<<<block_count, THREADS_PER_BLOCK>>>(result, offset, stride, rounded_length);
 
         // Wait for kernel to complete
         cudaDeviceSynchronize();
@@ -125,30 +115,26 @@ void exclusive_scan(int* input, int N, int* result) {
 
     // Set the last element to 0 (identity element for addition)
     int identity = 0;
-    cudaMemcpy(&result[N - 1], &identity, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(&result[rounded_length - 1], &identity, sizeof(int), cudaMemcpyHostToDevice);
 
     // Execute downsweep phase with a while loop
-    offset = N / 2;
+    offset = rounded_length / 2;
     while (offset >= 1) {
         // Calculate the stride between elements
         int stride = offset * 2;
 
-        // Calculate the number of work items and ensure at least 1
-        int work_items = N / stride;
-        if (work_items * stride < N) work_items++;
+        // Calculate the number of work items based on rounded length
+        int work_items = rounded_length / stride;
+        if (work_items * stride < rounded_length) work_items++;
 
         // Ensure we have a minimum of 1 work item
         work_items = (work_items > 0) ? work_items : 1;
 
         // Calculate grid dimensions
-        int block_count = work_items / THREADS_PER_BLOCK;
-        if (work_items % THREADS_PER_BLOCK != 0) block_count++;
+        int block_count = (work_items + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
 
-        // Ensure we have at least one block
-        block_count = (block_count > 0) ? block_count : 1;
-
-        // Launch the kernel
-        downsweep_op_kernel<<<block_count, THREADS_PER_BLOCK>>>(result, offset, stride, N);
+        // Launch the kernel with enough threads to handle rounded_length
+        downsweep_op_kernel<<<block_count, THREADS_PER_BLOCK>>>(result, offset, stride, rounded_length);
 
         // Wait for kernel to complete
         cudaDeviceSynchronize();
